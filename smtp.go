@@ -57,11 +57,12 @@ func NewPlainDialer(host string, port int, username, password string) *Dialer {
 
 // Dial dials and authenticates to an SMTP server. The returned SendCloser
 // should be closed when done using it.
-func (d *Dialer) Dial() (SendCloser, error) {
-	conn, err := netDialTimeout("tcp", addr(d.Host, d.Port), 10*time.Second)
+func (d *Dialer) Dial(timeout time.Duration) (SendCloser, error) {
+	conn, err := netDialTimeout("tcp", addr(d.Host, d.Port), timeout)
 	if err != nil {
 		return nil, err
 	}
+	conn.SetDeadline(time.Now().Add(timeout))
 
 	if d.SSL {
 		conn = tlsClient(conn, d.tlsConfig())
@@ -110,7 +111,8 @@ func (d *Dialer) Dial() (SendCloser, error) {
 			return nil, err
 		}
 	}
-
+	//clear deadline
+	conn.SetDeadline(time.Time{})
 	return &smtpSender{c, d}, nil
 }
 
@@ -128,7 +130,7 @@ func addr(host string, port int) string {
 // DialAndSend opens a connection to the SMTP server, sends the given emails and
 // closes the connection.
 func (d *Dialer) DialAndSend(m ...*Message) error {
-	s, err := d.Dial()
+	s, err := d.Dial(time.Second * 10)
 	if err != nil {
 		return err
 	}
@@ -146,7 +148,7 @@ func (c *smtpSender) Send(from string, to []string, msg io.WriterTo) error {
 	if err := c.Mail(from); err != nil {
 		if err == io.EOF {
 			// This is probably due to a timeout, so reconnect and try again.
-			sc, derr := c.d.Dial()
+			sc, derr := c.d.Dial(time.Second * 10)
 			if derr == nil {
 				if s, ok := sc.(*smtpSender); ok {
 					*c = *s
